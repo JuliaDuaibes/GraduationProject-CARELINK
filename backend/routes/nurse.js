@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const db = require('../db');
 const { insertNotification } = require('../notifications');
 const medicalRecordService = require('../services/medicalRecordService');
+const { recordPaymentSplit } = require('../services/bookingPaymentService');
 
 const router = express.Router();
 
@@ -343,7 +344,7 @@ router.get('/dashboard/:userId', async (req, res) => {
       const params = [];
       if (await hasTable('payment')) {
         queryParts.push(
-          `SELECT amount, paymentStatus AS status, createdAt
+          `SELECT ${await providerShareSqlExpr()} AS amount, paymentStatus AS status, createdAt
            FROM payment
            WHERE providerUserId = ?`
         );
@@ -1316,6 +1317,29 @@ async function ensurePaymentForRequest(requestId) {
   );
 }
 
+/**
+ * SQL expression for the provider's share of a `payment` row. Earnings must
+ * never include the admin commission: use the recorded split
+ * (`provider_amount`) when present, else the provider's configured hourly
+ * rate, else the raw amount — always capped at the amount actually paid.
+ */
+async function providerShareSqlExpr(alias = 'payment') {
+  const a = alias;
+  const hasProviderAmount = await hasColumn('payment', 'provider_amount');
+  const hasProviderRates = await hasTable('provider_rates');
+  const rateSub = hasProviderRates
+    ? `(SELECT pr.provider_hour_rate FROM provider_rates pr
+        WHERE BINARY pr.providerId = BINARY ${a}.providerUserId
+        ORDER BY (pr.rateAcceptanceStatus = 'accepted') DESC, pr.id DESC
+        LIMIT 1)`
+    : 'NULL';
+  const candidates = [];
+  if (hasProviderAmount) candidates.push(`NULLIF(${a}.provider_amount, 0)`);
+  candidates.push(`NULLIF(${rateSub}, 0)`);
+  candidates.push(`${a}.amount`);
+  return `LEAST(COALESCE(${candidates.join(', ')}, 0), ${a}.amount)`;
+}
+
 async function syncProviderPayments(providerId) {
   const [rows] = await db.query(
     `SELECT requestId
@@ -1822,6 +1846,12 @@ async function syncNurseEarnings(providerId) {
        COALESCE(p.provider_amount, 0) AS providerAmount,
        COALESCE(p.amount, 0) AS paidAmount,
        COALESCE(pr.provider_hour_rate, 0) AS configuredRate,
+       COALESCE((
+         SELECT pr2.provider_hour_rate FROM provider_rates pr2
+         WHERE BINARY pr2.providerId = BINARY sr.providerUserId
+         ORDER BY (pr2.rateAcceptanceStatus = 'accepted') DESC, pr2.id DESC
+         LIMIT 1
+       ), 0) AS fallbackRate,
        COALESCE(ac.commission_amount, 0) AS commissionAmount
      FROM servicerequest sr
      LEFT JOIN careprovider cp ON BINARY cp.userId = BINARY sr.providerUserId
@@ -1841,11 +1871,21 @@ async function syncNurseEarnings(providerId) {
   let totalEarned = 0;
   const normalizedSessions = sessions.map((row) => {
     const configured = Number(row.configuredRate || 0);
+    const fallbackRate = Number(row.fallbackRate || 0);
     const providerAmount = Number(row.providerAmount || 0);
     const paidAmount = Number(row.paidAmount || 0);
     const commission = Number(row.commissionAmount || 0);
-    let rate = providerAmount > 0 ? providerAmount : configured;
+    // Provider earns the provider rate only — the admin commission on top of
+    // it (paid by the patient) is never part of the nurse's earnings.
+    let rate = providerAmount > 0
+      ? providerAmount
+      : configured > 0
+        ? configured
+        : fallbackRate;
     if (rate <= 0 && paidAmount > 0) rate = Math.max(0, paidAmount - commission);
+    if (paidAmount > 0 && rate > paidAmount) {
+      rate = Math.max(0, paidAmount - commission);
+    }
     rate = Math.round(rate * 100) / 100;
     totalEarned += rate;
     return {
@@ -2637,7 +2677,8 @@ router.get('/payments/:providerId', async (req, res) => {
       queryParts.push(
         `SELECT p.paymentId AS id, p.providerUserId AS providerId,
                 sr.serviceType AS service, pu.fullName AS patientName,
-                p.amount, p.paymentStatus AS status, p.paymentMethod AS paymentMethod,
+                ${await providerShareSqlExpr('p')} AS amount,
+                p.paymentStatus AS status, p.paymentMethod AS paymentMethod,
                 p.createdAt AS date
          FROM payment p
          LEFT JOIN servicerequest sr ON sr.requestId = p.requestId
@@ -2686,7 +2727,7 @@ router.get('/payments/:providerId/summary', async (req, res) => {
     const params = [];
     if (await hasTable('payment')) {
       queryParts.push(
-        `SELECT amount, paymentStatus AS status, createdAt
+        `SELECT ${await providerShareSqlExpr()} AS amount, paymentStatus AS status, createdAt
          FROM payment
          WHERE providerUserId = ?`
       );
@@ -2702,6 +2743,7 @@ router.get('/payments/:providerId/summary', async (req, res) => {
     }
 
     let m = { monthSum: 0, weekSum: 0, daySum: 0 };
+    // Sums below use the provider share only (never the admin commission).
     if (queryParts.length) {
       const [[result]] = await db.query(
         `SELECT
@@ -2748,6 +2790,24 @@ router.put('/payments/:providerId/:transactionId/status', async (req, res) => {
            WHERE paymentId = ? AND providerUserId = ?`,
           [st, transactionId, providerId],
         );
+      }
+      if (st === 'paid') {
+        // Persist the provider/admin split so the nurse is credited the
+        // provider rate only and the commission stays with the admin.
+        try {
+          const [[payRow]] = await db.query(
+            `SELECT requestId, providerUserId, amount FROM payment
+             WHERE paymentId = ? AND providerUserId = ?`,
+            [transactionId, providerId],
+          );
+          if (payRow) {
+            await recordPaymentSplit(
+              payRow.requestId,
+              payRow.providerUserId,
+              Number(payRow.amount),
+            );
+          }
+        } catch (_) {}
       }
     }
     if (await hasTable('payments')) {

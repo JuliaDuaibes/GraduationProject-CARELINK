@@ -6617,7 +6617,29 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
+  // Canonical pricing: providerAmount = provider rate, adminAmount = the
+  // commission the patient paid on top of it, patientPaid = sum of both.
+  double _payoutProviderAmount(Map<String, dynamic> payout) =>
+      _num(payout['providerAmount']) > 0
+          ? _num(payout['providerAmount'])
+          : _num(payout['amount']);
+
+  double _payoutAdminAmount(Map<String, dynamic> payout) =>
+      _num(payout['adminAmount']);
+
+  double _payoutPatientPaid(Map<String, dynamic> payout) =>
+      _num(payout['patientPaid']) > 0
+          ? _num(payout['patientPaid'])
+          : _payoutProviderAmount(payout) + _payoutAdminAmount(payout);
+
   Widget _payoutSummaryBox(Map<String, dynamic> payout) {
+    final sessions = _int(payout['sessionsCovered']) > 0
+        ? _int(payout['sessionsCovered'])
+        : _int(payout['completedSessions']);
+    final providerAmount = _payoutProviderAmount(payout);
+    final rate = _num(payout['providerRate']) > 0
+        ? _num(payout['providerRate'])
+        : (sessions > 0 ? providerAmount / sessions : providerAmount);
     return Container(
       padding: EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -6627,19 +6649,23 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       ),
       child: Column(
         children: [
+          _receiptLine('Total Sessions', '$sessions'),
+          _receiptLine('Total Points', '$sessions'),
+          _receiptLine('Rate per Point', _money(rate)),
           _receiptLine(
-            'Total Sessions',
-            '${_int(payout['completedSessions'])}',
+            'Patient Paid',
+            _money(_payoutPatientPaid(payout)),
+            strong: true,
           ),
-          _receiptLine('Total Points', '${_int(payout['completedSessions'])}'),
-          _receiptLine('Rate per Point', _money(100)),
-          _receiptLine('Total Amount', _money(payout['amount']), strong: true),
         ],
       ),
     );
   }
 
   Widget _payoutBreakdownBox(Map<String, dynamic> payout) {
+    final role =
+        (payout['providerRole'] ?? '').toString().trim().toLowerCase();
+    final providerLabel = role == 'doctor' ? 'Doctor Amount' : 'Nurse Amount';
     return Container(
       padding: EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -6649,8 +6675,12 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       ),
       child: Column(
         children: [
-          _receiptLine('Nurse Amount', _money(payout['amount']), green: true),
-          _receiptLine('Platform Fee (Admin)', _money(0)),
+          _receiptLine(
+            providerLabel,
+            _money(_payoutProviderAmount(payout)),
+            green: true,
+          ),
+          _receiptLine('Platform Fee (Admin)', _money(_payoutAdminAmount(payout))),
         ],
       ),
     );

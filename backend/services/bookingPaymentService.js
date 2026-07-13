@@ -144,10 +144,20 @@ function toStatus(value, allowed, fallback) {
   return fallback;
 }
 
-async function resolveServerAmount(requestId, providerUserId) {
+/**
+ * Canonical CareLink pricing:
+ *   providerAmount   = providerRate                     (never reduced by commission)
+ *   commissionAmount = providerRate * (commissionPct/100) — stored pre-computed in
+ *                      admin_commission.commission_amount
+ *   patientTotal     = providerRate + commissionAmount
+ * Returns `{ providerRate, commissionAmount, patientTotal }` or null when no
+ * accepted provider rate exists.
+ */
+async function resolvePriceBreakdown(requestId, providerUserId) {
   const hasProviderRates = await hasTable('provider_rates');
+  if (!hasProviderRates) return null;
   const hasAdminCommission = await hasTable('admin_commission');
-  if (hasProviderRates) {
+  {
     const commissionJoin = hasAdminCommission
       ? `LEFT JOIN admin_commission ac
            ON ac.specialization = pr.specialization COLLATE utf8mb4_unicode_ci
@@ -176,11 +186,22 @@ async function resolveServerAmount(requestId, providerUserId) {
        LIMIT 1`,
       [requestId, providerUserId],
     );
-    const patientPrice = Number(rateRows[0]?.patientPrice || 0);
-    if (Number.isFinite(patientPrice) && patientPrice > 0) {
-      return Math.round(patientPrice * 100) / 100;
+    const providerRate = Number(rateRows[0]?.providerRate || 0);
+    const commissionAmount = Math.max(0, Number(rateRows[0]?.adminCommission || 0));
+    if (Number.isFinite(providerRate) && providerRate > 0) {
+      return {
+        providerRate: Math.round(providerRate * 100) / 100,
+        commissionAmount: Math.round(commissionAmount * 100) / 100,
+        patientTotal: Math.round((providerRate + commissionAmount) * 100) / 100,
+      };
     }
   }
+  return null;
+}
+
+async function resolveServerAmount(requestId, providerUserId) {
+  const breakdown = await resolvePriceBreakdown(requestId, providerUserId);
+  if (breakdown && breakdown.patientTotal > 0) return breakdown.patientTotal;
 
   const hasHourly = await hasColumn('careprovider', 'hourlyRate');
   const hasFee = await hasColumn('careprovider', 'consultationFee');
@@ -482,6 +503,45 @@ async function createApiPayment(body) {
   };
 }
 
+/**
+ * Persist the provider/admin split on the payment row:
+ *   provider_amount = provider rate (exact hourly amount owed to the provider)
+ *   admin_amount    = patientTotal - provider rate (the commission)
+ * Leaves the escrow `status` column untouched so the admin finance ledger
+ * still credits wallets/transaction_log with these same figures later.
+ */
+async function recordPaymentSplit(requestId, providerUserId, paidTotal) {
+  const hasProviderAmount = await hasColumn('payment', 'provider_amount');
+  const hasAdminAmount = await hasColumn('payment', 'admin_amount');
+  const hasFinalAmount = await hasColumn('payment', 'final_amount');
+  if (!hasProviderAmount || !hasAdminAmount) return null;
+
+  const total = Math.round(Math.max(0, Number(paidTotal) || 0) * 100) / 100;
+  if (total <= 0) return null;
+
+  const breakdown = await resolvePriceBreakdown(requestId, providerUserId);
+  let providerAmount;
+  if (breakdown && breakdown.providerRate > 0) {
+    providerAmount = Math.min(breakdown.providerRate, total);
+  } else {
+    const commission = Math.max(0, Number(breakdown?.commissionAmount || 0));
+    providerAmount = Math.max(0, total - commission);
+  }
+  providerAmount = Math.round(providerAmount * 100) / 100;
+  const adminAmount = Math.round((total - providerAmount) * 100) / 100;
+
+  await db.execute(
+    `UPDATE payment
+     SET provider_amount = ?, admin_amount = ?${hasFinalAmount ? ', final_amount = ?' : ''},
+         updatedAt = NOW()
+     WHERE requestId = ?`,
+    hasFinalAmount
+      ? [providerAmount, adminAmount, total, requestId]
+      : [providerAmount, adminAmount, requestId],
+  );
+  return { providerAmount, adminAmount, total };
+}
+
 async function confirmDemoPayment(body) {
   if (!assertNoSensitivePaymentKeys(body)) {
     throw httpError(
@@ -502,6 +562,7 @@ async function confirmDemoPayment(body) {
 
   const [rows] = await db.query(
     `SELECT p.paymentId, p.paymentMethod, p.paymentStatus, p.amount,
+            p.providerUserId,
             sr.status AS requestStatus
      FROM payment p
      JOIN servicerequest sr ON sr.requestId = p.requestId
@@ -548,6 +609,11 @@ async function confirmDemoPayment(body) {
       [p.paymentId],
     );
   }
+
+  // Record the provider/admin split immediately so provider earnings never
+  // absorb the admin commission. Canonical rule:
+  //   provider gets the full provider rate; admin gets patientTotal - rate.
+  await recordPaymentSplit(appointmentId, p.providerUserId, Number(p.amount));
 
   await syncServiceRequestPayment(appointmentId, method, 'paid');
   await db.execute(
@@ -823,6 +889,12 @@ async function createLegacyPatientPayment(body) {
     );
   }
 
+  if (computedStatus === 'paid') {
+    try {
+      await recordPaymentSplit(appointmentId, providerUserId, finalAmount);
+    } catch (_) {}
+  }
+
   if (hasPaymentMethodSr || hasPaymentStatusSr) {
     const updates = [];
     const updateValues = [];
@@ -856,6 +928,8 @@ async function createLegacyPatientPayment(body) {
 }
 
 module.exports = {
+  recordPaymentSplit,
+  resolvePriceBreakdown,
   createApiPayment,
   confirmDemoPayment,
   getAppointmentPayment,

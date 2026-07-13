@@ -918,7 +918,7 @@ async function syncFinanceLedger() {
         `SELECT provider_hour_rate
          FROM provider_rates
          WHERE BINARY providerId = BINARY ?
-         ORDER BY id DESC
+         ORDER BY (rateAcceptanceStatus = 'accepted') DESC, id DESC
          LIMIT 1`,
         [providerId],
       );
@@ -997,6 +997,12 @@ async function syncProviderWalletForPayout(providerId) {
        COALESCE(p.provider_amount, 0) AS providerAmount,
        COALESCE(p.final_amount, p.amount, 0) AS totalAmount,
        COALESCE(pr.provider_hour_rate, 0) AS configuredRate,
+       COALESCE((
+         SELECT pr2.provider_hour_rate FROM provider_rates pr2
+         WHERE BINARY pr2.providerId = BINARY p.providerUserId
+         ORDER BY (pr2.rateAcceptanceStatus = 'accepted') DESC, pr2.id DESC
+         LIMIT 1
+       ), 0) AS fallbackRate,
        COALESCE(ac.commission_amount, 0) AS commissionAmount
      FROM payment p
      JOIN servicerequest sr ON BINARY sr.requestId = BINARY p.requestId
@@ -1021,10 +1027,20 @@ async function syncProviderWalletForPayout(providerId) {
   for (const row of earnedRows) {
     const providerAmount = Number(row.providerAmount || 0);
     const configuredRate = Number(row.configuredRate || 0);
+    const fallbackRate = Number(row.fallbackRate || 0);
     const totalAmount = Number(row.totalAmount || 0);
     const commissionAmount = Number(row.commissionAmount || 0);
-    let share = providerAmount > 0 ? providerAmount : configuredRate;
+    // Provider share is the provider rate only; the admin commission the
+    // patient paid on top of it is never part of provider earnings.
+    let share = providerAmount > 0
+      ? providerAmount
+      : configuredRate > 0
+        ? configuredRate
+        : fallbackRate;
     if (share <= 0 && totalAmount > 0) {
+      share = Math.max(0, totalAmount - commissionAmount);
+    }
+    if (totalAmount > 0 && share > totalAmount) {
       share = Math.max(0, totalAmount - commissionAmount);
     }
     calculatedEarned += Math.max(0, share);
@@ -1145,7 +1161,31 @@ async function getFinanceData() {
       COALESCE(w.total_earned, 0) AS totalEarned,
       COALESCE(w.pending_amount, 0) AS pendingAmount,
       COALESCE(w.paid_amount, 0) AS paidAmount,
-      COUNT(sr.requestId) AS completedSessions
+      COUNT(sr.requestId) AS completedSessions,
+      COALESCE((
+        SELECT pr2.provider_hour_rate FROM provider_rates pr2
+        WHERE BINARY pr2.providerId = BINARY po.providerId
+        ORDER BY (pr2.rateAcceptanceStatus = 'accepted') DESC, pr2.id DESC
+        LIMIT 1
+      ), 0) AS providerRate,
+      COALESCE((
+        SELECT SUM(COALESCE(p2.provider_amount, 0)) FROM payment p2
+        WHERE BINARY p2.providerUserId = BINARY po.providerId
+          AND LOWER(CAST(p2.paymentStatus AS CHAR)) = 'paid'
+      ), 0) AS providerEarnedTotal,
+      COALESCE((
+        SELECT SUM(COALESCE(p2.admin_amount, 0)) FROM payment p2
+        WHERE BINARY p2.providerUserId = BINARY po.providerId
+          AND LOWER(CAST(p2.paymentStatus AS CHAR)) = 'paid'
+      ), 0) AS adminEarnedTotal,
+      COALESCE((
+        SELECT ac.commission_amount FROM admin_commission ac
+        WHERE CONVERT(ac.specialization USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+              CONVERT(COALESCE(cp.specialization, '') USING utf8mb4) COLLATE utf8mb4_unicode_ci
+          AND BINARY CAST(ac.serviceType AS CHAR) = BINARY LOWER(CAST(u.role AS CHAR))
+        ORDER BY ac.id DESC
+        LIMIT 1
+      ), 0) AS commissionPerSession
     FROM payout_requests po
     LEFT JOIN user u ON BINARY u.userId = BINARY po.providerId
     LEFT JOIN careprovider cp ON BINARY cp.userId = BINARY po.providerId
@@ -1163,6 +1203,34 @@ async function getFinanceData() {
       ELSE 5
     END, po.createdAt DESC
   `);
+  // Canonical payout figures: the provider is paid their rate only; the admin
+  // commission (paid by the patient on top of the rate) is pro-rated from the
+  // recorded payment splits, falling back to the configured commission.
+  const payoutRows = payouts.map((po) => {
+    const round2 = (v) => Math.round(v * 100) / 100;
+    const providerAmount = round2(Math.max(0, Number(po.amount || 0)));
+    const rate = Number(po.providerRate || 0);
+    const earned = Number(po.providerEarnedTotal || 0);
+    const adminEarned = Number(po.adminEarnedTotal || 0);
+    const sessionsCovered = rate > 0
+      ? Math.max(1, Math.round(providerAmount / rate))
+      : Number(po.completedSessions || 0);
+    let adminAmount = 0;
+    if (earned > 0 && adminEarned > 0) {
+      adminAmount = adminEarned * Math.min(1, providerAmount / earned);
+    } else {
+      adminAmount = Number(po.commissionPerSession || 0) * sessionsCovered;
+    }
+    adminAmount = round2(Math.max(0, adminAmount));
+    return {
+      ...po,
+      providerAmount,
+      adminAmount,
+      patientPaid: round2(providerAmount + adminAmount),
+      providerRate: rate,
+      sessionsCovered,
+    };
+  });
   const [wallets] = await db.query(`
     SELECT
       w.providerId,
@@ -1209,7 +1277,7 @@ async function getFinanceData() {
     },
     pricing,
     transactions,
-    payouts,
+    payouts: payoutRows,
     wallets,
     topServices,
     flow: [
