@@ -251,7 +251,8 @@ Browse, filter, and explore healthcare providers before booking.
 
 | Find Providers | Filter Providers |
 | --- | --- |
-|<img src="assets/readme/screenshots/ai-assistant-input.jpeg" alt="CareLink AI assistant symptom input screen" width="280">| <img src="assets/readme/screenshots/find-providers.jpeg" alt="CareLink find providers screen" width="280"> |
+| <img src="assets/readme/screenshots/find-providers.jpeg" alt="CareLink find providers screen" width="280">
+|<img src="assets/readme/screenshots/ai-assistant-input.jpeg" alt="CareLink AI assistant symptom input screen" width="280"> |
 
 | Provider Details |
 | --- |
