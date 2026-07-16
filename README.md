@@ -237,7 +237,7 @@ AI analyzes patient symptoms and recommends the most suitable healthcare provide
 
 | AI Assistant Input | AI Recommendation Result |
 | --- | --- |
-| <img src="assets/readme/screenshots/ai-assistant-input.jpeg" alt="CareLink AI assistant symptom input screen" width="280"> | <img src="assets/readme/screenshots/ai-recommendation-result.jpeg" alt="CareLink AI recommendation result screen" width="280"> |
+|  <img src="assets/readme/screenshots/provider-filters.jpeg" alt="CareLink provider filters screen" width="280">  | <img src="assets/readme/screenshots/ai-recommendation-result.jpeg" alt="CareLink AI recommendation result screen" width="280"> |
 
 </div>
 
@@ -251,7 +251,7 @@ Browse, filter, and explore healthcare providers before booking.
 
 | Find Providers | Filter Providers |
 | --- | --- |
-| <img src="assets/readme/screenshots/find-providers.jpeg" alt="CareLink find providers screen" width="280"> | <img src="assets/readme/screenshots/provider-filters.jpeg" alt="CareLink provider filters screen" width="280"> |
+|<img src="assets/readme/screenshots/ai-assistant-input.jpeg" alt="CareLink AI assistant symptom input screen" width="280">| <img src="assets/readme/screenshots/find-providers.jpeg" alt="CareLink find providers screen" width="280"> |
 
 | Provider Details |
 | --- |
