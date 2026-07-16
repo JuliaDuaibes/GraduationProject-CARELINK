@@ -215,20 +215,117 @@ flutter run
 
 ## Screenshots
 
-> Screenshots will be added from the actual CareLink application. No fake screenshots are included.
+<div align="center">
 
-<details open>
-<summary><strong>Screenshot placeholders</strong></summary>
+### 🏠 Home
 
-| Patient Home | AI Recommendation | Doctor Dashboard |
-| --- | --- | --- |
-| _Placeholder_ | _Placeholder_ | _Placeholder_ |
+Patient dashboard showing upcoming appointments, quick actions, and recommended providers.
 
-| Nurse Dashboard | Admin Dashboard |
+| Light Mode Home | Dark Mode Home |
 | --- | --- |
-| _Placeholder_ | _Placeholder_ |
+| <img src="assets/readme/screenshots/patient-home-light.jpeg" alt="CareLink light mode patient home dashboard" width="280"> | <img src="assets/readme/screenshots/patient-home-dark.jpeg" alt="CareLink dark mode patient home dashboard" width="280"> |
 
-</details>
+</div>
+
+---
+
+<div align="center">
+
+### 🤖 AI Care Assistant
+
+AI analyzes patient symptoms and recommends the most suitable healthcare provider.
+
+| AI Assistant Input | AI Recommendation Result |
+| --- | --- |
+| <img src="assets/readme/screenshots/ai-assistant-input.jpeg" alt="CareLink AI assistant symptom input screen" width="280"> | <img src="assets/readme/screenshots/ai-recommendation-result.jpeg" alt="CareLink AI recommendation result screen" width="280"> |
+
+</div>
+
+---
+
+<div align="center">
+
+### 🔍 Find Providers
+
+Browse, filter, and explore healthcare providers before booking.
+
+| Find Providers | Filter Providers |
+| --- | --- |
+| <img src="assets/readme/screenshots/find-providers.jpeg" alt="CareLink find providers screen" width="280"> | <img src="assets/readme/screenshots/provider-filters.jpeg" alt="CareLink provider filters screen" width="280"> |
+
+| Provider Details |
+| --- |
+| <img src="assets/readme/screenshots/provider-details.jpeg" alt="CareLink provider details screen" width="280"> |
+
+</div>
+
+---
+
+<div align="center">
+
+### 📅 Appointment Booking Flow
+
+Complete booking workflow from selecting an appointment to secure payment.
+
+| 1. Select Date & Time | 2. Calendar Picker |
+| --- | --- |
+| <img src="assets/readme/screenshots/select-date-time.jpeg" alt="CareLink select date and time booking screen" width="280"> | <img src="assets/readme/screenshots/calendar-picker.jpeg" alt="CareLink calendar picker booking screen" width="280"> |
+
+| 3. Choose Location | 4. Review Booking |
+| --- | --- |
+| <img src="assets/readme/screenshots/choose-location.jpeg" alt="CareLink choose appointment location screen" width="280"> | <img src="assets/readme/screenshots/review-booking.jpeg" alt="CareLink review booking screen" width="280"> |
+
+| 5. Payment |
+| --- |
+| <img src="assets/readme/screenshots/payment.jpeg" alt="CareLink payment screen" width="280"> |
+
+</div>
+
+---
+
+<div align="center">
+
+### 📖 My Bookings
+
+View and manage upcoming, completed, and pending appointments.
+
+| My Bookings | Booking Calendar |
+| --- | --- |
+| <img src="assets/readme/screenshots/my-bookings.jpeg" alt="CareLink my bookings screen" width="280"> | <img src="assets/readme/screenshots/booking-calendar.jpeg" alt="CareLink booking calendar screen" width="280"> |
+
+</div>
+
+---
+
+<div align="center">
+
+### 💬 Messaging
+
+Real-time communication between patients and healthcare providers.
+
+| Chat Screen |
+| --- |
+| <img src="assets/readme/screenshots/messaging.jpeg" alt="CareLink chat messaging screen" width="280"> |
+
+</div>
+
+---
+
+<div align="center">
+
+### 🔐 Authentication
+
+Secure password recovery and email verification process.
+
+| 1. Forgot Password | 2. Verify Email |
+| --- | --- |
+| <img src="assets/readme/screenshots/forgot-password.jpeg" alt="CareLink forgot password screen" width="280"> | <img src="assets/readme/screenshots/verify-email.jpeg" alt="CareLink verify email screen" width="280"> |
+
+| 3. Reset Password |
+| --- |
+| <img src="assets/readme/screenshots/reset-password.jpeg" alt="CareLink reset password screen" width="280"> |
+
+</div>
 
 ---
 
